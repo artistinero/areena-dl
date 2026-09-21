@@ -1,0 +1,7 @@
+#!/bin/bash
+URL="$1"
+cd "$PWD" || exit
+VIDEO_ID=$(yt-dlp --list-formats "$URL" 2>/dev/null | grep -E 'mp4.*[0-9]+x[0-9]+' | sort -t'x' -k2 -n | tail -1 | awk '{print $1}')
+AUDIO_ID=$(yt-dlp --list-formats "$URL" 2>/dev/null | grep 'audio only' | head -1 | awk '{print $1}')
+echo "Paras video: $VIDEO_ID, paras ääni: $AUDIO_ID"
+yt-dlp -o "$PWD/%(title)s.%(ext)s" -f "$VIDEO_ID+$AUDIO_ID" --merge-output-format mkv --write-subs --sub-langs all --embed-subs --sub-format "ass/srt/best" "$URL"
