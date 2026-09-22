@@ -35,11 +35,13 @@ write_series_nfo_and_poster() {
     local first_meta="$1"
     local series_url="$2"
 
-    local episode_title series_title thumbnail_url description
-    episode_title=$(echo "$first_meta" | jq -r '.episode_title // .title // ""')
-    series_title=$(echo "$episode_title" | sed 's/:.*//' | xargs)
+    local thumbnail_url series_title description page_html
     thumbnail_url=$(echo "$first_meta" | jq -r '.thumbnail // ""')
-    description=$(curl -s "$series_url" \
+    page_html=$(curl -s "$series_url")
+    series_title=$(echo "$page_html" \
+        | grep -o 'property="og:title" content="[^"]*"' \
+        | sed 's/property="og:title" content="//;s/"$//')
+    description=$(echo "$page_html" \
         | grep -o 'property="og:description" content="[^"]*"' \
         | sed 's/property="og:description" content="//;s/"$//')
 
