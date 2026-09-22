@@ -30,17 +30,50 @@ NFOEOF
     echo "  OK: $(basename "$base")"
 }
 
+write_series_nfo_and_poster() {
+    local first_meta="$1"
+    local series_url="$2"
+
+    local episode_title series_title thumbnail_url description
+    episode_title=$(echo "$first_meta" | jq -r '.episode_title // .title // ""')
+    series_title=$(echo "$episode_title" | sed 's/:.*//' | xargs)
+    thumbnail_url=$(echo "$first_meta" | jq -r '.thumbnail // ""')
+    description=$(curl -s "$series_url" \
+        | grep -o 'property="og:description" content="[^"]*"' \
+        | sed 's/property="og:description" content="//;s/"$//')
+
+    if [[ ! -f "$PWD/tvshow.nfo" ]]; then
+        cat > "$PWD/tvshow.nfo" <<NFOEOF
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<tvshow>
+  <title><![CDATA[${series_title}]]></title>
+  <plot><![CDATA[${description}]]></plot>
+</tvshow>
+NFOEOF
+        echo "  Sarja NFO: $series_title"
+    fi
+
+    if [[ ! -f "$PWD/poster.jpg" && -n "$thumbnail_url" ]]; then
+        curl -s "$thumbnail_url" -o "$PWD/poster.jpg"
+        echo "  Sarjaposter: poster.jpg"
+    fi
+}
+
 process_url() {
     local url="$1"
     echo "Haetaan metadata: $url"
 
     local all_meta
-    # --destdir "$PWD" jotta tiedostonimet lasketaan nykyiseen kansioon
     all_meta=$(yle-dl --showmetadata --destdir "$PWD" --restrict-filename-no-specials "$url" 2>/dev/null)
 
     local count
     count=$(echo "$all_meta" | jq 'length')
     echo "Löytyi $count jaksoa"
+
+    # Sarjan tvshow.nfo ja poster.jpg
+    if [[ "$count" -gt 1 ]]; then
+        write_series_nfo_and_poster "$(echo "$all_meta" | jq '.[0]')" "$url"
+    fi
 
     local i
     for (( i=0; i<count; i++ )); do
