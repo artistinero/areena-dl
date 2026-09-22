@@ -1,0 +1,80 @@
+#!/bin/bash
+# Luo puuttuvat NFO- ja thumb-tiedostot jo ladatuille jaksoille.
+# Aja sarjan kansiossa: cd /mnt/Shared/Yle/Sarja && areena-dl-backfill <areena-url>
+
+write_nfo_and_thumb() {
+    local meta="$1"
+    local base="$2"
+
+    local title description aired thumbnail_url program_id
+    title=$(echo "$meta" | jq -r '.episode_title // .title // ""')
+    description=$(echo "$meta" | jq -r '.description // ""')
+    aired=$(echo "$meta" | jq -r '.publish_timestamp // ""' | cut -c1-10)
+    thumbnail_url=$(echo "$meta" | jq -r '.thumbnail // ""')
+    program_id=$(echo "$meta" | jq -r '.program_id // ""')
+
+    cat > "${base}.nfo" <<NFOEOF
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+  <title><![CDATA[${title}]]></title>
+  <plot><![CDATA[${description}]]></plot>
+  <aired>${aired}</aired>
+  <uniqueid type="yle">${program_id}</uniqueid>
+</episodedetails>
+NFOEOF
+
+    if [[ -n "$thumbnail_url" ]]; then
+        curl -s "$thumbnail_url" -o "${base}.jpg"
+    fi
+
+    echo "  OK: $(basename "$base")"
+}
+
+process_url() {
+    local url="$1"
+    echo "Haetaan metadata: $url"
+
+    local all_meta
+    # --destdir "$PWD" jotta tiedostonimet lasketaan nykyiseen kansioon
+    all_meta=$(yle-dl --showmetadata --destdir "$PWD" --restrict-filename-no-specials "$url" 2>/dev/null)
+
+    local count
+    count=$(echo "$all_meta" | jq 'length')
+    echo "Löytyi $count jaksoa"
+
+    local i
+    for (( i=0; i<count; i++ )); do
+        local meta filename base
+        meta=$(echo "$all_meta" | jq ".[$i]")
+        filename=$(echo "$meta" | jq -r '.filename // ""')
+
+        if [[ -z "$filename" ]]; then
+            echo "  OHITA: ei tiedostonimeä"
+            continue
+        fi
+
+        base="${filename%.*}"
+
+        if [[ ! -f "$filename" ]]; then
+            echo "  PUUTTUU: $(basename "$filename")"
+            continue
+        fi
+
+        if [[ -f "${base}.nfo" ]]; then
+            echo "  JÄTÄ: NFO jo olemassa: $(basename "$base")"
+            continue
+        fi
+
+        write_nfo_and_thumb "$meta" "$base"
+    done
+}
+
+if [[ $# -eq 0 ]]; then
+    echo "Käyttö: $(basename "$0") <areena-url> [<areena-url> ...]"
+    echo "Aja sarjan kansiossa jossa mediatiedostot sijaitsevat."
+    exit 1
+fi
+
+for url in "$@"; do
+    process_url "$url"
+done
