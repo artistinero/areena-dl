@@ -7,8 +7,8 @@ AUDIO_ID=$(echo "$FORMATS" | grep 'audio only' | head -1 | awk '{print $1}')
 
 if [[ -n "$VIDEO_ID" && -n "$AUDIO_ID" ]]; then
     echo "Paras video: $VIDEO_ID, paras ääni: $AUDIO_ID"
-    yt-dlp -o "$PWD/%(title)s.%(ext)s" -f "$VIDEO_ID+$AUDIO_ID" --merge-output-format mkv --write-subs --sub-langs all --embed-subs --sub-format "ass/srt/best" "$URL"
+    yt-dlp -o "$PWD/%(title)s.%(ext)s" -f "$VIDEO_ID+$AUDIO_ID" --merge-output-format mkv --write-subs --sub-langs all --embed-subs --sub-format "ass/srt/best" --windows-filenames "$URL"
 else
     echo "Videoformaatteja ei löydy, kokeillaan yle-dl (äänisisältö)..."
-    yle-dl --destdir "$PWD" "$URL"
+    yle-dl --destdir "$PWD" --restrict-filename-no-specials "$URL"
 fi
