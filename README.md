@@ -23,6 +23,36 @@ Sarjan kansioon syntyy:
 
 Tiedostonimet muodossa `S01E05_Jakson nimi.mp3` tai `2023-02-05_Jakson nimi.mp3`.
 
+### `areena-dl-watch`
+
+Tarkistaa seurattavat sarjat ja lataa uudet jaksot automaattisesti. Ajettavaksi cronilla.
+
+- Tarkistaa TeraStation-mountin ennen latauksia, yrittää remounttia tarvittaessa
+- Lähettää ntfy-ilmoituksen virheistä ja uusista latauksista
+- Lokit: `~/.local/log/areena-dl-watch/`
+- Config: `~/.config/areena-dl-watch.json`
+
+```bash
+areena-dl-watch
+```
+
+Cron joka kolmas päivä klo 7:
+```
+0 7 */3 * * PATH="$HOME/.local/bin:$PATH" /usr/local/bin/areena-dl-watch
+```
+
+### `areena-dl-watch-add`
+
+Lisää sarjan automaattiseen seurantaan. Aja kohdehakemistossa.
+
+```bash
+cd /mnt/terastation/dlna/other-audio/music-pods/Jazzklubi
+areena-dl-watch-add https://areena.yle.fi/1-2120710
+```
+
+Lisää nykyisen hakemiston ja URL:n `~/.config/areena-dl-watch.json`-tiedostoon.
+Kopioi `areena-dl-watch.json.example` pohjaksi tai anna skriptin luoda config automaattisesti.
+
 ### `areena-dl-backfill`
 
 Luo puuttuvat NFO- ja thumb-tiedostot jo aiemmin ladatuille jaksoille.
@@ -35,11 +65,8 @@ areena-dl-backfill https://areena.yle.fi/1-4172550
 ## Asennus
 
 ```bash
-# Kopioi skriptit
-sudo cp areena-dl /usr/local/bin/
-cp areena-dl-backfill ~/.local/bin/
-sudo chmod +x /usr/local/bin/areena-dl
-chmod +x ~/.local/bin/areena-dl-backfill
+sudo cp areena-dl areena-dl-watch areena-dl-watch-add /usr/local/bin/
+sudo chmod +x /usr/local/bin/areena-dl /usr/local/bin/areena-dl-watch /usr/local/bin/areena-dl-watch-add
 ```
 
 ## Riippuvuudet
