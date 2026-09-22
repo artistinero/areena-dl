@@ -66,7 +66,8 @@ process_url() {
     echo "Haetaan metadata: $url"
 
     local all_meta
-    all_meta=$(yle-dl --showmetadata --destdir "$PWD" --restrict-filename-no-specials "$url" 2>/dev/null)
+    all_meta=$(yle-dl --showmetadata --destdir "$PWD" --restrict-filename-no-specials \
+        --output-template '${episode_or_date}_${title}' "$url" 2>/dev/null)
 
     local count
     count=$(echo "$all_meta" | jq 'length')
