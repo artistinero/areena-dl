@@ -1,6 +1,50 @@
 #!/bin/bash
 URL="$1"
 
+YLEDL_ARGS=(--destdir "$PWD" --restrict-filename-no-specials --output-template '${episode_or_date}_${title}')
+
+write_nfo_and_thumb() {
+    local meta="$1"
+    local base="$2"
+
+    local title description aired thumbnail_url program_id
+    title=$(echo "$meta" | jq -r '.episode_title // .title // ""')
+    description=$(echo "$meta" | jq -r '.description // ""')
+    aired=$(echo "$meta" | jq -r '.publish_timestamp // ""' | cut -c1-10)
+    thumbnail_url=$(echo "$meta" | jq -r '.thumbnail // ""')
+    program_id=$(echo "$meta" | jq -r '.program_id // ""')
+
+    cat > "${base}.nfo" <<NFOEOF
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<episodedetails>
+  <title><![CDATA[${title}]]></title>
+  <plot><![CDATA[${description}]]></plot>
+  <aired>${aired}</aired>
+  <uniqueid type="yle">${program_id}</uniqueid>
+</episodedetails>
+NFOEOF
+
+    if [[ -n "$thumbnail_url" ]]; then
+        curl -s "$thumbnail_url" -o "${base}.jpg"
+    fi
+
+    echo "NFO + thumb: $(basename "$base")"
+}
+
+yle_download_with_meta() {
+    local url="$1"
+    local meta filename
+
+    meta=$(yle-dl --showmetadata "${YLEDL_ARGS[@]}" "$url" 2>/dev/null | jq '.[0]')
+    filename=$(echo "$meta" | jq -r '.filename // ""')
+
+    yle-dl "${YLEDL_ARGS[@]}" "$url"
+
+    if [[ -n "$filename" ]]; then
+        write_nfo_and_thumb "$meta" "${filename%.*}"
+    fi
+}
+
 download_one() {
     local url="$1"
     local formats video_id audio_id
@@ -12,12 +56,14 @@ download_one() {
         echo "Video: $video_id + $audio_id"
         yt-dlp -o "$PWD/%(upload_date)s_%(title)s.%(ext)s" -f "$video_id+$audio_id" \
             --merge-output-format mkv --write-subs --sub-langs all \
-            --embed-subs --sub-format "ass/srt/best" --windows-filenames "$url"
+            --embed-subs --sub-format "ass/srt/best" --windows-filenames \
+            --embed-metadata --write-thumbnail "$url"
     else
-        yle-dl --destdir "$PWD" --restrict-filename-no-specials \
-            --output-template '${episode_or_date}_${title}' "$url"
+        yle_download_with_meta "$url"
     fi
 }
+
+# --- pääohjelma ---
 
 FORMATS=$(yt-dlp --list-formats "$URL" 2>/dev/null)
 VIDEO_ID=$(echo "$FORMATS" | grep -E 'mp4.*[0-9]+x[0-9]+' | sort -t'x' -k2 -n | tail -1 | awk '{print $1}')
@@ -27,7 +73,8 @@ if [[ -n "$VIDEO_ID" && -n "$AUDIO_ID" ]]; then
     echo "Video: $VIDEO_ID + $AUDIO_ID"
     yt-dlp -o "$PWD/%(upload_date)s_%(title)s.%(ext)s" -f "$VIDEO_ID+$AUDIO_ID" \
         --merge-output-format mkv --write-subs --sub-langs all \
-        --embed-subs --sub-format "ass/srt/best" --windows-filenames "$URL"
+        --embed-subs --sub-format "ass/srt/best" --windows-filenames \
+        --embed-metadata --write-thumbnail "$URL"
 else
     EPISODES=$(yle-dl --showepisodepage "$URL" 2>/dev/null)
     COUNT=$(echo "$EPISODES" | grep -c 'areena.yle.fi')
@@ -40,7 +87,6 @@ else
             download_one "$ep_url"
         done <<< "$EPISODES"
     else
-        yle-dl --destdir "$PWD" --restrict-filename-no-specials \
-            --output-template '${episode_or_date}_${title}' "$URL"
+        yle_download_with_meta "$URL"
     fi
 fi
