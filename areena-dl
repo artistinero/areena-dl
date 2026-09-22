@@ -10,11 +10,12 @@ download_one() {
 
     if [[ -n "$video_id" && -n "$audio_id" ]]; then
         echo "Video: $video_id + $audio_id"
-        yt-dlp -o "$PWD/%(title)s.%(ext)s" -f "$video_id+$audio_id" \
+        yt-dlp -o "$PWD/%(upload_date)s_%(title)s.%(ext)s" -f "$video_id+$audio_id" \
             --merge-output-format mkv --write-subs --sub-langs all \
             --embed-subs --sub-format "ass/srt/best" --windows-filenames "$url"
     else
-        yle-dl --destdir "$PWD" --restrict-filename-no-specials "$url"
+        yle-dl --destdir "$PWD" --restrict-filename-no-specials \
+            --output-template '${episode_or_date}_${title}' "$url"
     fi
 }
 
@@ -24,7 +25,7 @@ AUDIO_ID=$(echo "$FORMATS" | grep 'audio only' | head -1 | awk '{print $1}')
 
 if [[ -n "$VIDEO_ID" && -n "$AUDIO_ID" ]]; then
     echo "Video: $VIDEO_ID + $AUDIO_ID"
-    yt-dlp -o "$PWD/%(title)s.%(ext)s" -f "$VIDEO_ID+$AUDIO_ID" \
+    yt-dlp -o "$PWD/%(upload_date)s_%(title)s.%(ext)s" -f "$VIDEO_ID+$AUDIO_ID" \
         --merge-output-format mkv --write-subs --sub-langs all \
         --embed-subs --sub-format "ass/srt/best" --windows-filenames "$URL"
 else
@@ -39,6 +40,7 @@ else
             download_one "$ep_url"
         done <<< "$EPISODES"
     else
-        yle-dl --destdir "$PWD" --restrict-filename-no-specials "$URL"
+        yle-dl --destdir "$PWD" --restrict-filename-no-specials \
+            --output-template '${episode_or_date}_${title}' "$URL"
     fi
 fi
