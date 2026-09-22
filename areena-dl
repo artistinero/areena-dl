@@ -1,14 +1,44 @@
 #!/bin/bash
 URL="$1"
 
+download_one() {
+    local url="$1"
+    local formats video_id audio_id
+    formats=$(yt-dlp --list-formats "$url" 2>/dev/null)
+    video_id=$(echo "$formats" | grep -E 'mp4.*[0-9]+x[0-9]+' | sort -t'x' -k2 -n | tail -1 | awk '{print $1}')
+    audio_id=$(echo "$formats" | grep 'audio only' | head -1 | awk '{print $1}')
+
+    if [[ -n "$video_id" && -n "$audio_id" ]]; then
+        echo "Video: $video_id + $audio_id"
+        yt-dlp -o "$PWD/%(title)s.%(ext)s" -f "$video_id+$audio_id" \
+            --merge-output-format mkv --write-subs --sub-langs all \
+            --embed-subs --sub-format "ass/srt/best" --windows-filenames "$url"
+    else
+        yle-dl --destdir "$PWD" --restrict-filename-no-specials "$url"
+    fi
+}
+
 FORMATS=$(yt-dlp --list-formats "$URL" 2>/dev/null)
 VIDEO_ID=$(echo "$FORMATS" | grep -E 'mp4.*[0-9]+x[0-9]+' | sort -t'x' -k2 -n | tail -1 | awk '{print $1}')
 AUDIO_ID=$(echo "$FORMATS" | grep 'audio only' | head -1 | awk '{print $1}')
 
 if [[ -n "$VIDEO_ID" && -n "$AUDIO_ID" ]]; then
-    echo "Paras video: $VIDEO_ID, paras ääni: $AUDIO_ID"
-    yt-dlp -o "$PWD/%(title)s.%(ext)s" -f "$VIDEO_ID+$AUDIO_ID" --merge-output-format mkv --write-subs --sub-langs all --embed-subs --sub-format "ass/srt/best" --windows-filenames "$URL"
+    echo "Video: $VIDEO_ID + $AUDIO_ID"
+    yt-dlp -o "$PWD/%(title)s.%(ext)s" -f "$VIDEO_ID+$AUDIO_ID" \
+        --merge-output-format mkv --write-subs --sub-langs all \
+        --embed-subs --sub-format "ass/srt/best" --windows-filenames "$URL"
 else
-    echo "Videoformaatteja ei löydy, kokeillaan yle-dl (äänisisältö)..."
-    yle-dl --destdir "$PWD" --restrict-filename-no-specials "$URL"
+    EPISODES=$(yle-dl --showepisodepage "$URL" 2>/dev/null)
+    COUNT=$(echo "$EPISODES" | grep -c 'areena.yle.fi')
+
+    if [[ "$COUNT" -gt 1 ]]; then
+        echo "Löytyi $COUNT jaksoa, ladataan kaikki..."
+        while IFS= read -r ep_url; do
+            [[ -z "$ep_url" ]] && continue
+            echo "--- $ep_url"
+            download_one "$ep_url"
+        done <<< "$EPISODES"
+    else
+        yle-dl --destdir "$PWD" --restrict-filename-no-specials "$URL"
+    fi
 fi
