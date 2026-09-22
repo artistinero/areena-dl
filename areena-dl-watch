@@ -1,0 +1,205 @@
+#!/usr/bin/env python3
+"""Seuraa Areena-sarjoja ja lataa uudet jaksot automaattisesti."""
+
+import json
+import os
+import subprocess
+import sys
+import logging
+from datetime import datetime
+from pathlib import Path
+
+CONFIG_FILE = Path.home() / ".config" / "areena-dl-watch.json"
+LOG_DIR = Path.home() / ".local" / "log" / "areena-dl-watch"
+NTFY_URL = "https://brainbin.tailf1fe0b.ts.net/areena"
+MOUNT_TEST_TIMEOUT = 10  # sekuntia
+YLEDL_ARGS = ["--restrict-filename-no-specials", "--output-template", "${episode_or_date}_${title}"]
+
+
+def setup_logging():
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    log_file = LOG_DIR / f"areena-dl-watch-{datetime.now().strftime('%Y-%m-%d')}.log"
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(message)s",
+        handlers=[
+            logging.FileHandler(log_file),
+            logging.StreamHandler(sys.stdout),
+        ],
+    )
+
+
+def ntfy(title, message, priority="default"):
+    try:
+        subprocess.run(
+            ["curl", "-s", "-m", "10", "-d", message,
+             "-H", f"Title: {title}", "-H", f"Priority: {priority}",
+             NTFY_URL],
+            capture_output=True, timeout=15,
+        )
+    except Exception as e:
+        logging.warning(f"ntfy-ilmoitus epäonnistui: {e}")
+
+
+def check_mount(path: Path) -> bool:
+    """Tarkistaa onko polku käytettävissä kirjoittamalla testitiedoston."""
+    test_file = path / ".areena-dl-mount-test"
+    try:
+        test_file.write_text("ok")
+        test_file.unlink()
+        return True
+    except OSError:
+        return False
+
+
+def try_remount(path: Path) -> bool:
+    """Yrittää mountata polun uudelleen."""
+    logging.info(f"Yritetään mountata uudelleen: {path}")
+    try:
+        result = subprocess.run(
+            ["mount", str(path)],
+            capture_output=True, text=True, timeout=MOUNT_TEST_TIMEOUT,
+        )
+        if result.returncode == 0:
+            return check_mount(path)
+        logging.error(f"mount epäonnistui: {result.stderr.strip()}")
+    except subprocess.TimeoutExpired:
+        logging.error(f"mount aikakatkaistiin: {path}")
+    except Exception as e:
+        logging.error(f"mount-virhe: {e}")
+    return False
+
+
+def ensure_mount(path: Path) -> bool:
+    if check_mount(path):
+        return True
+    logging.warning(f"Mount ei vastaa: {path} — yritetään uudelleen")
+    if try_remount(path):
+        logging.info(f"Remount onnistui: {path}")
+        return True
+    msg = f"Kohdepolku ei ole käytettävissä: {path}"
+    logging.error(msg)
+    ntfy("areena-dl-watch: mount-virhe", msg, priority="high")
+    return False
+
+
+def get_episode_metadata(url: str, destdir: Path) -> list[dict]:
+    """Hakee kaikkien jaksojen metadata yle-dl:ltä."""
+    try:
+        result = subprocess.run(
+            ["yle-dl", "--showmetadata", "--destdir", str(destdir)] + YLEDL_ARGS + [url],
+            capture_output=True, text=True, timeout=120,
+        )
+        raw = result.stdout.strip()
+        if not raw:
+            return []
+        data = json.loads(raw)
+        return data if isinstance(data, list) else [data]
+    except subprocess.TimeoutExpired:
+        logging.error(f"yle-dl --showmetadata aikakatkaistiin: {url}")
+    except json.JSONDecodeError as e:
+        logging.error(f"Metadata-parsinta epäonnistui ({url}): {e}")
+    except Exception as e:
+        logging.error(f"Metadata-haku epäonnistui ({url}): {e}")
+    return []
+
+
+def already_downloaded(filename: str, destdir: Path) -> bool:
+    base = Path(filename).stem
+    for f in destdir.iterdir():
+        if f.stem == base:
+            return True
+    return False
+
+
+def download_episode(url: str, destdir: Path) -> bool:
+    logging.info(f"  Ladataan: {url}")
+    try:
+        result = subprocess.run(
+            ["areena-dl", url],
+            cwd=str(destdir), timeout=3600,
+        )
+        return result.returncode == 0
+    except subprocess.TimeoutExpired:
+        logging.error(f"  Lataus aikakatkaistiin: {url}")
+    except Exception as e:
+        logging.error(f"  Latausvirhe: {e}")
+    return False
+
+
+def process_series(url: str, destdir: Path):
+    logging.info(f"Tarkistetaan: {url} → {destdir}")
+    destdir.mkdir(parents=True, exist_ok=True)
+
+    if not ensure_mount(destdir):
+        return
+
+    episodes = get_episode_metadata(url, destdir)
+    if not episodes:
+        logging.warning(f"  Ei jaksoja tai metadata-virhe: {url}")
+        ntfy("areena-dl-watch: virhe", f"Ei saatu jaksoja: {url}", priority="default")
+        return
+
+    new_count = 0
+    errors = 0
+    for ep in episodes:
+        filename = ep.get("filename", "")
+        program_id = ep.get("program_id", "")
+        if not filename:
+            continue
+        if already_downloaded(filename, destdir):
+            continue
+        ep_url = f"https://areena.yle.fi/{program_id}" if program_id else url
+        logging.info(f"  Uusi jakso: {Path(filename).name}")
+        ok = download_episode(ep_url, destdir)
+        if ok:
+            new_count += 1
+        else:
+            errors += 1
+            ntfy("areena-dl-watch: latausvirhe", f"Lataus epäonnistui: {ep_url}", priority="default")
+
+    if new_count > 0:
+        logging.info(f"  Ladattu {new_count} uutta jaksoa")
+        ntfy("areena-dl-watch: uusia jaksoja", f"{destdir.name}: {new_count} uutta jaksoa ladattu")
+    elif errors == 0:
+        logging.info("  Ei uusia jaksoja")
+
+
+def load_config() -> list[dict]:
+    if not CONFIG_FILE.exists():
+        print(f"Config-tiedostoa ei löydy: {CONFIG_FILE}", file=sys.stderr)
+        print(f"\nLuo tiedosto muodossa:", file=sys.stderr)
+        print(json.dumps([
+            {"url": "https://areena.yle.fi/1-4172550", "destdir": "/mnt/terastation/Yle/SarjanNimi"}
+        ], indent=2, ensure_ascii=False), file=sys.stderr)
+        sys.exit(1)
+    with open(CONFIG_FILE) as f:
+        return json.load(f)
+
+
+def main():
+    setup_logging()
+    logging.info("=== areena-dl-watch käynnistyi ===")
+
+    config = load_config()
+    if not config:
+        logging.info("Config on tyhjä, ei tehtävää.")
+        return
+
+    for entry in config:
+        url = entry.get("url", "").strip()
+        destdir = Path(entry.get("destdir", "")).expanduser()
+        if not url or not destdir:
+            logging.warning(f"Virheellinen config-merkintä: {entry}")
+            continue
+        try:
+            process_series(url, destdir)
+        except Exception as e:
+            logging.error(f"Odottamaton virhe ({url}): {e}")
+            ntfy("areena-dl-watch: odottamaton virhe", str(e), priority="high")
+
+    logging.info("=== areena-dl-watch valmis ===")
+
+
+if __name__ == "__main__":
+    main()
